@@ -1,13 +1,16 @@
 import { styled } from '@linaria/react';
 import { t } from '@lingui/core/macro';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { H2Title } from 'twenty-ui/display';
 import { Card, Section } from 'twenty-ui/layout';
 import { themeCssVariables } from 'twenty-ui/theme-constants';
 import { Toggle } from 'twenty-ui/input';
 
+import { useMutation, useQuery } from '@apollo/client/react';
+
 import { useSnackBar } from '@/ui/feedback/snack-bar-manager/hooks/useSnackBar';
-import { NumberInput } from '@/ui/input/components/NumberInput';
+import { GET_AGENT_CAPABILITY_RULES } from '@/agent-config/graphql/queries/getAgentCapabilityRules';
+import { UPSERT_AGENT_CAPABILITY_RULE } from '@/agent-config/graphql/mutations/upsertAgentCapabilityRule';
 
 type EntityCapability = {
   entityType: string;
@@ -19,14 +22,34 @@ type EntityCapability = {
   rateLimit: number;
 };
 
-const DEFAULT_CAPABILITIES: EntityCapability[] = [
-  { entityType: 'person',          label: 'People',          canRead: true,  canWrite: true,  canDelete: false, canBulkOps: true,  rateLimit: 50 },
-  { entityType: 'company',         label: 'Companies',       canRead: true,  canWrite: true,  canDelete: false, canBulkOps: false, rateLimit: 50 },
-  { entityType: 'opportunity',     label: 'Opportunities',   canRead: true,  canWrite: true,  canDelete: false, canBulkOps: false, rateLimit: 50 },
-  { entityType: 'note',            label: 'Notes',           canRead: true,  canWrite: true,  canDelete: false, canBulkOps: false, rateLimit: 50 },
-  { entityType: 'task',            label: 'Tasks',           canRead: true,  canWrite: true,  canDelete: true,  canBulkOps: false, rateLimit: 50 },
-  { entityType: 'workspaceMember', label: 'Team Members',    canRead: true,  canWrite: false, canDelete: false, canBulkOps: false, rateLimit: 20 },
+type AgentCapabilityRule = {
+  id: string;
+  agentId: string | null;
+  entityType: string;
+  canRead: boolean;
+  canWrite: boolean;
+  canDelete: boolean;
+  canBulkOps: boolean;
+  rateLimit: number;
+};
+
+const ENTITY_META: Array<{ entityType: string; label: string }> = [
+  { entityType: 'person',          label: 'People' },
+  { entityType: 'company',         label: 'Companies' },
+  { entityType: 'opportunity',     label: 'Opportunities' },
+  { entityType: 'note',            label: 'Notes' },
+  { entityType: 'task',            label: 'Tasks' },
+  { entityType: 'workspaceMember', label: 'Team Members' },
 ];
+
+const DEFAULT_CAPS: Record<string, Omit<EntityCapability, 'entityType' | 'label'>> = {
+  person:          { canRead: true,  canWrite: true,  canDelete: false, canBulkOps: true,  rateLimit: 50 },
+  company:         { canRead: true,  canWrite: true,  canDelete: false, canBulkOps: false, rateLimit: 50 },
+  opportunity:     { canRead: true,  canWrite: true,  canDelete: false, canBulkOps: false, rateLimit: 50 },
+  note:            { canRead: true,  canWrite: true,  canDelete: false, canBulkOps: false, rateLimit: 50 },
+  task:            { canRead: true,  canWrite: true,  canDelete: true,  canBulkOps: false, rateLimit: 50 },
+  workspaceMember: { canRead: true,  canWrite: false, canDelete: false, canBulkOps: false, rateLimit: 20 },
+};
 
 const StyledTableWrapper = styled.div`
   border: 1px solid ${themeCssVariables.border.color.medium};
@@ -71,13 +94,6 @@ const StyledEntityLabel = styled.span`
   font-weight: ${themeCssVariables.font.weight.medium};
 `;
 
-const StyledRateLimitInput = styled.div`
-  align-items: center;
-  display: flex;
-  gap: ${themeCssVariables.spacing[1]};
-  max-width: 80px;
-`;
-
 const StyledRateLimitSuffix = styled.span`
   color: ${themeCssVariables.font.color.tertiary};
   font-size: ${themeCssVariables.font.size.xs};
@@ -94,8 +110,42 @@ type CapabilityKey = 'canRead' | 'canWrite' | 'canDelete' | 'canBulkOps';
 
 export const SettingsAIPermissionsTab = () => {
   const { enqueueSuccessSnackBar, enqueueErrorSnackBar } = useSnackBar();
-  const [capabilities, setCapabilities] = useState<EntityCapability[]>(DEFAULT_CAPABILITIES);
+  const [capabilities, setCapabilities] = useState<EntityCapability[]>(
+    ENTITY_META.map(({ entityType, label }) => ({
+      entityType,
+      label,
+      ...DEFAULT_CAPS[entityType],
+    })),
+  );
   const [isDirty, setIsDirty] = useState(false);
+
+  const { data } = useQuery<{ agentCapabilityRules: AgentCapabilityRule[] }>(
+    GET_AGENT_CAPABILITY_RULES,
+  );
+
+  const [upsertRule] = useMutation(UPSERT_AGENT_CAPABILITY_RULE);
+
+  useEffect(() => {
+    if (!data?.agentCapabilityRules) return;
+
+    const rules = data.agentCapabilityRules.filter((r) => r.agentId === null);
+
+    setCapabilities(
+      ENTITY_META.map(({ entityType, label }) => {
+        const rule = rules.find((r) => r.entityType === entityType);
+
+        return {
+          entityType,
+          label,
+          canRead: rule?.canRead ?? DEFAULT_CAPS[entityType].canRead,
+          canWrite: rule?.canWrite ?? DEFAULT_CAPS[entityType].canWrite,
+          canDelete: rule?.canDelete ?? DEFAULT_CAPS[entityType].canDelete,
+          canBulkOps: rule?.canBulkOps ?? DEFAULT_CAPS[entityType].canBulkOps,
+          rateLimit: rule?.rateLimit ?? DEFAULT_CAPS[entityType].rateLimit,
+        };
+      }),
+    );
+  }, [data]);
 
   const handleToggle = useCallback(
     (entityType: string, field: CapabilityKey, value: boolean) => {
@@ -123,13 +173,28 @@ export const SettingsAIPermissionsTab = () => {
 
   const handleSave = useCallback(async () => {
     try {
-      // TODO: Persist via GraphQL mutation once backend resolver is wired
+      await Promise.all(
+        capabilities.map((cap) =>
+          upsertRule({
+            variables: {
+              input: {
+                entityType: cap.entityType,
+                canRead: cap.canRead,
+                canWrite: cap.canWrite,
+                canDelete: cap.canDelete,
+                canBulkOps: cap.canBulkOps,
+                rateLimit: cap.rateLimit,
+              },
+            },
+          }),
+        ),
+      );
       enqueueSuccessSnackBar({ message: t`Agent permissions saved` });
       setIsDirty(false);
     } catch {
       enqueueErrorSnackBar({ message: t`Failed to save permissions` });
     }
-  }, [capabilities, enqueueSuccessSnackBar, enqueueErrorSnackBar]);
+  }, [capabilities, upsertRule, enqueueSuccessSnackBar, enqueueErrorSnackBar]);
 
   return (
     <>
@@ -170,26 +235,24 @@ export const SettingsAIPermissionsTab = () => {
                 onChange={(v) => handleToggle(cap.entityType, 'canBulkOps', v)}
                 toggleSize="small"
               />
-              <StyledRateLimitInput>
-                <input
-                  type="number"
-                  min={1}
-                  max={1000}
-                  value={cap.rateLimit}
-                  onChange={(e) =>
-                    handleRateLimitChange(cap.entityType, Number(e.target.value))
-                  }
-                  style={{
-                    background: 'transparent',
-                    border: `1px solid ${themeCssVariables.border.color.medium}`,
-                    borderRadius: themeCssVariables.border.radius.sm,
-                    color: 'inherit',
-                    fontSize: themeCssVariables.font.size.sm,
-                    padding: '2px 6px',
-                    width: '52px',
-                  }}
-                />
-              </StyledRateLimitInput>
+              <input
+                type="number"
+                min={1}
+                max={1000}
+                value={cap.rateLimit}
+                onChange={(e) =>
+                  handleRateLimitChange(cap.entityType, Number(e.target.value))
+                }
+                style={{
+                  background: 'transparent',
+                  border: `1px solid ${themeCssVariables.border.color.medium}`,
+                  borderRadius: themeCssVariables.border.radius.sm,
+                  color: 'inherit',
+                  fontSize: themeCssVariables.font.size.sm,
+                  padding: '2px 6px',
+                  width: '52px',
+                }}
+              />
             </StyledDataRow>
           ))}
         </StyledTableWrapper>
@@ -223,7 +286,7 @@ export const SettingsAIPermissionsTab = () => {
             <StyledEntityLabel>
               {t`Actions per user per hour`}
             </StyledEntityLabel>
-            <StyledRateLimitInput>
+            <div style={{ alignItems: 'center', display: 'flex', gap: themeCssVariables.spacing[1] }}>
               <input
                 type="number"
                 min={1}
@@ -240,7 +303,7 @@ export const SettingsAIPermissionsTab = () => {
                 }}
               />
               <StyledRateLimitSuffix>{t`actions`}</StyledRateLimitSuffix>
-            </StyledRateLimitInput>
+            </div>
           </StyledDataRow>
         </Card>
       </Section>
