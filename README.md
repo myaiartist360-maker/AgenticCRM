@@ -1,177 +1,369 @@
 <p align="center">
-  <a href="https://www.twenty.com">
-    <img src="./packages/twenty-website/public/images/core/logo.svg" width="100px" alt="Twenty logo" />
-  </a>
+  <img src="./packages/twenty-website/public/images/core/logo.svg" width="80px" alt="AgenticCRM logo" />
 </p>
 
-<h1 align="center">Twenty AI — The AI-First Open-Source CRM</h1>
+<h1 align="center">AgenticCRM</h1>
+
+<p align="center"><strong>The AI-First Open-Source CRM</strong></p>
 
 <p align="center">
-  A fork of <a href="https://github.com/twentyhq/twenty">Twenty CRM</a> extended with a full AI agent layer: graph memory, semantic search, a Claude-style chat assistant, and a configurable LLM brain.
+  A conversational AI agent that lives inside your CRM — reads, writes, and reasons over your deals, contacts, and pipelines. Built on top of <a href="https://github.com/twentyhq/twenty">Twenty CRM</a>.
 </p>
 
 <p align="center">
-  <a href="https://twenty.com">🌐 Upstream Website</a> ·
-  <a href="https://docs.twenty.com">📚 Upstream Docs</a> ·
-  <a href="https://github.com/twentyhq/twenty">⬆️ Original Repo</a>
+  <a href="#-run-locally">Local</a> ·
+  <a href="#-github-codespaces">Codespaces</a> ·
+  <a href="#-docker-self-hosted">Docker</a> ·
+  <a href="#-deploy-on-aws">AWS</a> ·
+  <a href="#-ai-features">Features</a> ·
+  <a href="#-credits">Credits</a>
 </p>
 
 <br />
 
 <p align="center">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/twentyhq/twenty/refs/heads/main/packages/twenty-website/public/images/readme/github-cover-dark.png" />
-      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/twentyhq/twenty/refs/heads/main/packages/twenty-website/public/images/readme/github-cover-light.png" />
-      <img src="./packages/twenty-website/public/images/readme/github-cover-light.png" alt="Cover" />
-    </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/twentyhq/twenty/refs/heads/main/packages/twenty-website/public/images/readme/github-cover-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/twentyhq/twenty/refs/heads/main/packages/twenty-website/public/images/readme/github-cover-light.png" />
+    <img src="./packages/twenty-website/public/images/readme/github-cover-light.png" alt="AgenticCRM" />
+  </picture>
 </p>
 
-<br />
-
 ---
 
-## What is this fork?
+## AI Features
 
-This repository is **Twenty AI** — Twenty CRM with a complete AI-first layer bolted on. Every CRM record is synced to a graph database, every action is remembered, and a conversational agent can perform any CRM operation on behalf of the user.
+### What the agent can do
 
-The AI capabilities were built in five phases on top of the upstream Twenty codebase. Nothing from upstream was removed; everything new lives in dedicated modules.
+- **Search & summarize** — "Show me all open deals above $50k"
+- **Create & update records** — "Create a contact named Sarah at Acme Corp"
+- **Move pipeline stages** — "Move TechCorp deal to Proposal Sent"
+- **Bulk operations** — "Mark all overdue tasks as complete"
+- **Log notes** — "Log a note: called John, follow up in 2 weeks"
+- **Audit trail** — every action is logged and searchable
 
----
+### How memory works
 
-## AI Features Added
+| Layer | What it stores |
+|---|---|
+| **Graph DB** | Every CRM entity as a node; relationships as typed edges (WORKS_AT, LINKED_TO, ASSIGNED_TO…) |
+| **Episodic memory** | Conversation turns + agent actions with pgvector embeddings |
+| **Knowledge base** | MD files in `ai-knowledge/` — workflows, rules, procedures — auto-indexed on startup |
 
-### Phase 1 — Graph Database Layer
+### LLM providers supported
 
-Every CRM entity (people, companies, opportunities, notes, tasks) is dual-written into a PostgreSQL-backed graph (`graphNode` + `graphEdge` tables). Relationships (WORKS_AT, LINKED_TO, ASSIGNED_TO, etc.) are inferred automatically from entity fields and stored as typed edges.
-
-- `packages/twenty-server/src/modules/graph-db/` — `GraphDbService`, `GraphSyncListener`
-- Recursive CTE traversal up to configurable depth
-- pgvector IVFFlat cosine index for nearest-neighbour node search
-- TypeORM migration in `core` schema: `graphNode`, `graphEdge`, `aiMemoryEpisode`, `aiKnowledgeChunk`, `agentCapabilityRule`
-
-### Phase 2 — AI Memory Module
-
-The agent has three kinds of memory:
-
-| Memory type | What it stores | Where |
-|---|---|---|
-| **Episodic** | Conversation turns, tool calls, actions | `core.aiMemoryEpisode` + pgvector |
-| **Semantic** | Entity graph embeddings, knowledge chunks | `core.aiKnowledgeChunk` + pgvector |
-| **Knowledge base** | MD files in `ai-knowledge/` — workflows, rules, procedures | Chunked + indexed on server start |
-
-- `packages/twenty-server/src/modules/ai-memory/`
-- Knowledge loader auto-indexes `ai-knowledge/*.md` on `OnModuleInit`, skipping unchanged files
-- `MemoryContextBuilderService` assembles graph context + recent actions + relevant KB chunks into a system-prompt section
-
-**Knowledge base MD files** (`ai-knowledge/`):
-
-```
-workflows/   deal-progression.md, lead-qualification.md
-rules/       data-validation.md, assignment-rules.md
-settings/    agent-personality.md, capabilities.md, llm-providers.md
-procedures/  create-contact.md, update-deal-stage.md, search-and-summarize.md
-```
-
-### Phase 3 — AI Chat Module & LLM Configuration
-
-A Claude-style streaming chat pipeline accessible to any logged-in user:
-
-- Multi-provider LLM support: **OpenAI**, **Anthropic Claude**, **OpenRouter**, **Ollama** (local)
-- Providers and models defined in `ai-providers.json`; Ollama + OpenRouter added with `@ai-sdk/openai-compatible`
-- SSE streaming via BullMQ `aiStreamQueue`
-- CRM tool set: `searchEntities`, `createRecord`, `updateRecord`, `deleteRecord`, `stageChange`, `bulkUpdate`, `logNote`, `completeTask`, `getAuditLog`
-- `MemoryContextBuilderService` injects graph + episodic + knowledge context into every system prompt
-
-**Supported LLM providers:**
-
-| Provider | Notes |
+| Provider | Models |
 |---|---|
 | OpenAI | GPT-4o, o3, o4-mini |
 | Anthropic | Claude Sonnet 4.6, Claude Opus 4.7 |
-| OpenRouter | Unified API: Claude, GPT-4o, Gemini, Llama, DeepSeek, Mistral |
-| Ollama | Local: llama3.3, mistral, gemma3, qwen2.5, phi4, deepseek-r1 |
-
-### Phase 4 — Frontend: Chat Widget & LLM Settings
-
-- Full-screen chat widget available post-login (desktop + mobile)
-- **Settings → AI → Brain tab**: active providers, model counts, Ollama/OpenRouter status dots, memory layer health (Graph DB, Episodic Memory, Knowledge Base, pgvector)
-- **Settings → AI → Permissions tab**: capability matrix (read/write/delete/bulk toggles + rate/hr per entity type)
-- **Settings → AI → Models tab**: select Smart / Fast model, enable/disable providers
-
-### Phase 5 — Agent Governance
-
-- **`AgentAuditService`**: every agent action is stored in episodic memory (`type='action'`) — dual-purpose audit trail and AI context
-- **`AgentRateLimiterService`**: token-bucket rate limiting per entity type (`agent_rate:{workspace}:{user}:{entity}`) plus a global cap (200 actions/hr per user)
-- **`AgentCapabilityResolver`**: GraphQL API to read and save the capability matrix per workspace
-  - `agentCapabilityRules` query
-  - `upsertAgentCapabilityRule` mutation
-  - `deleteAgentCapabilityRule` mutation
-  - `seedDefaultAgentCapabilityRules` mutation
-- **Permissions tab** wired to the real GraphQL backend — loads on mount, saves on demand
+| OpenRouter | Claude, GPT-4o, Gemini 2.5 Pro, Llama 3.3, DeepSeek R1 |
+| Ollama (local) | llama3.3, mistral, gemma3, qwen2.5, phi4, deepseek-r1 |
 
 ---
 
-## Environment Variables (new)
+## Run Locally
+
+### Prerequisites
+
+- Node.js 20+
+- Yarn 4 (`corepack enable && corepack prepare yarn@4.6.0 --activate`)
+- PostgreSQL 15+ with the `vector` extension (`CREATE EXTENSION vector;`)
+- Redis 7+
+
+### 1. Clone
+
+```bash
+git clone https://github.com/myaiartist360-maker/AgenticCRM.git
+cd AgenticCRM
+```
+
+### 2. Install dependencies
+
+```bash
+yarn install
+```
+
+### 3. Configure environment
+
+```bash
+cp packages/twenty-server/.env.example packages/twenty-server/.env
+```
+
+Open `packages/twenty-server/.env` and set at minimum:
 
 ```env
-# Ollama (local LLM)
-OLLAMA_BASE_URL=http://localhost:11434/api
+# Required
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/agenticcrm
+REDIS_URL=redis://localhost:6379
+APP_SECRET=your-random-secret-here        # openssl rand -hex 32
+SERVER_URL=http://localhost:3000
+FRONT_BASE_URL=http://localhost:3001
 
-# OpenRouter
-OPENROUTER_API_KEY=sk-or-...
+# AI — pick at least one
+OPENAI_API_KEY=sk-...
+# ANTHROPIC_API_KEY=sk-ant-...
+# OPENROUTER_API_KEY=sk-or-...
+# OLLAMA_BASE_URL=http://localhost:11434/api
+```
 
-# Embedding model (used for pgvector semantic search)
-EMBEDDING_MODEL=text-embedding-3-small   # any OpenAI-compatible embedding endpoint
+### 4. Set up the database
+
+```bash
+# Create DB and run all migrations (includes AI schema)
+npx nx database:reset twenty-server
+```
+
+### 5. Start
+
+```bash
+yarn start
+# Frontend → http://localhost:3001
+# Backend  → http://localhost:3000
+```
+
+### 6. First login
+
+Go to `http://localhost:3001` → click **Continue with Email** → use the pre-filled demo credentials.
+
+Then: **Settings → AI → Models** to pick your LLM provider.
+
+---
+
+## GitHub Codespaces
+
+The fastest way to try AgenticCRM — no local setup needed.
+
+### 1. Open in Codespaces
+
+Click **Code → Codespaces → Create codespace on main** on the repo page, or:
+
+```
+https://codespaces.new/myaiartist360-maker/AgenticCRM
+```
+
+Codespaces automatically provisions a machine with Node, Postgres, and Redis.
+
+### 2. Run the setup script
+
+```bash
+bash packages/twenty-utils/setup-dev-env.sh
+```
+
+This detects the Codespaces environment, starts Postgres + Redis, creates databases, and copies `.env` files.
+
+### 3. Add your AI key
+
+```bash
+echo "OPENAI_API_KEY=sk-..." >> packages/twenty-server/.env
+```
+
+### 4. Start
+
+```bash
+yarn start
+```
+
+Codespaces will prompt you to open the forwarded ports (3000 and 3001) in your browser.
+
+---
+
+## Docker (Self-Hosted)
+
+### Quick start — single command
+
+```bash
+# Clone
+git clone https://github.com/myaiartist360-maker/AgenticCRM.git
+cd AgenticCRM/packages/twenty-docker
+
+# Copy and edit env
+cp .env.example .env
+# Edit .env: set SERVER_URL, APP_SECRET, OPENAI_API_KEY (or other provider)
+
+# Start everything
+docker compose up -d
+```
+
+This starts: `server`, `worker`, `db` (Postgres 15 + pgvector), `redis`.
+
+Frontend + backend both served from port **3000**.
+
+### docker-compose env variables
+
+```env
+# .env (packages/twenty-docker/.env)
+TAG=latest
+SERVER_URL=http://localhost:3000
+APP_SECRET=                        # openssl rand -hex 32
+PG_DATABASE_PASSWORD=postgres
+
+# AI
+OPENAI_API_KEY=sk-...
+# ANTHROPIC_API_KEY=sk-ant-...
+# OPENROUTER_API_KEY=sk-or-...
+```
+
+### Run database migrations
+
+```bash
+docker compose exec server yarn database:migrate:prod
+```
+
+### Check logs
+
+```bash
+docker compose logs -f server
+docker compose logs -f worker
+```
+
+### Stop
+
+```bash
+docker compose down           # keep data
+docker compose down -v        # wipe data too
 ```
 
 ---
 
-## Architecture
+## Deploy on AWS
 
-```
-packages/
-├── twenty-server/src/modules/
-│   ├── graph-db/          # GraphDbService, GraphSyncListener, entities
-│   ├── ai-memory/         # EpisodicMemoryService, SemanticMemoryService,
-│   │                      #   KnowledgeLoaderService, MemoryContextBuilderService
-│   └── agent-config/      # AgentCapabilityService, AgentCapabilityResolver,
-│                          #   AgentAuditService, AgentRateLimiterService
-│
-├── twenty-front/src/
-│   ├── modules/ai/        # Chat widget, hooks, GraphQL documents
-│   ├── modules/agent-config/graphql/   # Capability rule queries + mutations
-│   └── pages/settings/ai/
-│       ├── components/SettingsAIBrainTab.tsx
-│       ├── components/SettingsAIPermissionsTab.tsx
-│       └── components/SettingsAIModelsTab.tsx
-│
-└── ai-knowledge/          # MD knowledge base (RAG source)
-    ├── workflows/
-    ├── rules/
-    ├── settings/
-    └── procedures/
+### Option A — EC2 (simplest)
+
+**1. Launch an EC2 instance**
+
+- AMI: Ubuntu 24.04 LTS
+- Instance type: `t3.medium` minimum (`t3.large` recommended for LLM workloads)
+- Storage: 30 GB gp3
+- Security group: open ports 22 (SSH), 80, 443, 3000
+
+**2. Install dependencies on the instance**
+
+```bash
+# Connect
+ssh -i your-key.pem ubuntu@<EC2_IP>
+
+# Docker
+sudo apt update && sudo apt install -y docker.io docker-compose-plugin git
+sudo usermod -aG docker ubuntu && newgrp docker
 ```
 
-### Data flow
+**3. Clone and configure**
 
+```bash
+git clone https://github.com/myaiartist360-maker/AgenticCRM.git
+cd AgenticCRM/packages/twenty-docker
+cp .env.example .env
+nano .env   # set SERVER_URL=http://<EC2_IP>:3000, APP_SECRET, OPENAI_API_KEY
 ```
-User message
-    │
-    ▼
-AgentChatPipeline
-    │  ← MemoryContextBuilderService (graph + episodic + KB → system prompt)
-    ▼
-LLM (OpenAI / Claude / OpenRouter / Ollama)
-    │
-    ▼  tool_call?
-AgentRateLimiterService.guardAction()   ← checks capability + rate limit
-    │
-    ▼
-CRM Tool (search / create / update / delete / …)
-    │
-    ├──► GraphSyncListener (dual-write to graphNode / graphEdge)
-    └──► AgentAuditService.logAction()  (episodic memory + audit log)
+
+**4. Start**
+
+```bash
+docker compose up -d
 ```
+
+Visit `http://<EC2_IP>:3000`.
+
+**5. (Optional) Add HTTPS with nginx + Certbot**
+
+```bash
+sudo apt install -y nginx certbot python3-certbot-nginx
+# Point your domain A record to EC2_IP, then:
+sudo certbot --nginx -d your-domain.com
+```
+
+Update `SERVER_URL` and `FRONT_BASE_URL` in `.env` to `https://your-domain.com`, then `docker compose restart server`.
+
+---
+
+### Option B — AWS ECS with RDS + ElastiCache (production)
+
+**Architecture:**
+```
+ALB (HTTPS 443)
+  └── ECS Fargate
+        ├── agenticcrm-server  (port 3000)
+        └── agenticcrm-worker
+RDS PostgreSQL 15  (with pgvector extension enabled)
+ElastiCache Redis 7
+S3 bucket          (file storage)
+```
+
+**Step-by-step:**
+
+**1. Enable pgvector on RDS**
+
+```sql
+-- In your RDS Postgres instance:
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+> Use RDS PostgreSQL 15.4+ — pgvector is available as a supported extension.
+
+**2. Build and push Docker image**
+
+```bash
+# In repo root
+aws ecr create-repository --repository-name agenticcrm --region us-east-1
+aws ecr get-login-password | docker login --username AWS --password-stdin <ACCOUNT>.dkr.ecr.us-east-1.amazonaws.com
+
+docker build -f packages/twenty-server/Dockerfile -t agenticcrm-server .
+docker tag agenticcrm-server:latest <ACCOUNT>.dkr.ecr.us-east-1.amazonaws.com/agenticcrm:latest
+docker push <ACCOUNT>.dkr.ecr.us-east-1.amazonaws.com/agenticcrm:latest
+```
+
+**3. Create ECS Task Definition**
+
+Key environment variables for the task:
+
+```json
+[
+  { "name": "DATABASE_URL",      "value": "postgres://...rds.amazonaws.com/agenticcrm" },
+  { "name": "REDIS_URL",         "value": "redis://...cache.amazonaws.com:6379" },
+  { "name": "SERVER_URL",        "value": "https://your-domain.com" },
+  { "name": "STORAGE_TYPE",      "value": "s3" },
+  { "name": "STORAGE_S3_REGION", "value": "us-east-1" },
+  { "name": "STORAGE_S3_NAME",   "value": "agenticcrm-files" },
+  { "name": "APP_SECRET",        "valueFrom": "arn:aws:secretsmanager:..." },
+  { "name": "OPENAI_API_KEY",    "valueFrom": "arn:aws:secretsmanager:..." }
+]
+```
+
+> Store secrets (APP_SECRET, API keys) in **AWS Secrets Manager** and reference via `valueFrom`.
+
+**4. Run migrations as a one-off ECS task**
+
+```bash
+aws ecs run-task \
+  --cluster agenticcrm \
+  --task-definition agenticcrm-migrate \
+  --overrides '{"containerOverrides":[{"name":"server","command":["yarn","database:migrate:prod"]}]}'
+```
+
+**5. Create ECS Service + ALB**
+
+- Create an Application Load Balancer with HTTPS listener (ACM certificate)
+- Target group: port 3000, health check path `/healthz`
+- ECS Service: 1 server task + 1 worker task (separate task definitions)
+
+---
+
+## Environment Variables Reference
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `REDIS_URL` | Yes | Redis connection string |
+| `APP_SECRET` | Yes | Random 32-char secret for JWT signing |
+| `SERVER_URL` | Yes | Public URL of the backend |
+| `FRONT_BASE_URL` | Local only | Frontend URL (defaults to SERVER_URL in prod) |
+| `OPENAI_API_KEY` | AI | OpenAI key for GPT models + embeddings |
+| `ANTHROPIC_API_KEY` | AI | Anthropic key for Claude models |
+| `OPENROUTER_API_KEY` | AI | OpenRouter key (Claude, GPT-4o, Gemini, etc.) |
+| `OLLAMA_BASE_URL` | AI | Ollama base URL (e.g. `http://localhost:11434/api`) |
+| `STORAGE_TYPE` | Prod | `local` or `s3` |
+| `STORAGE_S3_REGION` | S3 | AWS region |
+| `STORAGE_S3_NAME` | S3 | S3 bucket name |
 
 ---
 
@@ -179,49 +371,24 @@ CRM Tool (search / create / update / delete / …)
 
 - [TypeScript](https://www.typescriptlang.org/)
 - [Nx](https://nx.dev/) monorepo
-- [NestJS](https://nestjs.com/) with [BullMQ](https://bullmq.io/), [PostgreSQL](https://www.postgresql.org/) + pgvector, [Redis](https://redis.io/)
-- [React 18](https://reactjs.org/) with [Jotai](https://jotai.org/), [Linaria](https://linaria.dev/), [Lingui](https://lingui.dev/)
-- [Vercel AI SDK](https://sdk.vercel.ai/) for streaming + multi-provider LLM
+- [NestJS](https://nestjs.com/) · [BullMQ](https://bullmq.io/) · [PostgreSQL 15 + pgvector](https://github.com/pgvector/pgvector) · [Redis](https://redis.io/)
+- [React 18](https://reactjs.org/) · [Jotai](https://jotai.org/) · [Linaria](https://linaria.dev/) · [Lingui](https://lingui.dev/)
+- [Vercel AI SDK](https://sdk.vercel.ai/) for streaming multi-provider LLM
 
 ---
 
-## Credits & Attribution
+## Credits
 
-This project is a fork of **[Twenty CRM](https://github.com/twentyhq/twenty)** — a beautiful, open-source CRM built by the [Twenty team](https://twenty.com) and its [community contributors](https://github.com/twentyhq/twenty/graphs/contributors).
+AgenticCRM is built on top of **[Twenty CRM](https://github.com/twentyhq/twenty)** — an open-source CRM crafted by the [Twenty team](https://twenty.com) and its [community contributors](https://github.com/twentyhq/twenty/graphs/contributors).
 
-All original Twenty code remains intact and is governed by the upstream license. The AI extensions in this fork were built on top of Twenty's excellent foundation without modifying any upstream logic.
+All original Twenty code is intact and governed by the [upstream license](https://github.com/twentyhq/twenty/blob/main/LICENSE). The AI layer (graph DB, memory, chat agent, capability governance) was added as new modules without modifying upstream logic.
 
-If you find value in this fork, please also **star the original repo** at [github.com/twentyhq/twenty](https://github.com/twentyhq/twenty) and consider contributing back to the upstream project.
-
----
-
-## Installation
-
-See the upstream docs — the setup process is identical:
-
-- 🚀 [Self-hosting with Docker Compose](https://docs.twenty.com/developers/self-host/capabilities/docker-compose)
-- 🖥️ [Local development setup](https://docs.twenty.com/developers/contribute/capabilities/local-setup)
-
-After setup, set the additional env vars above and run:
-
-```bash
-# Reset DB to apply the AI schema migration
-npx nx database:reset twenty-server
-
-# Start everything
-yarn start
-```
-
----
-
-## Thanks
+If this project is useful to you, please also **star the original** at [github.com/twentyhq/twenty](https://github.com/twentyhq/twenty).
 
 <p align="center">
-  <a href="https://www.chromatic.com/"><img src="./packages/twenty-website/public/images/readme/chromatic.png" height="30" alt="Chromatic" /></a>
-  <a href="https://greptile.com"><img src="./packages/twenty-website/public/images/readme/greptile.png" height="30" alt="Greptile" /></a>
-  <a href="https://sentry.io/"><img src="./packages/twenty-website/public/images/readme/sentry.png" height="30" alt="Sentry" /></a>
-  <a href="https://crowdin.com/"><img src="./packages/twenty-website/public/images/readme/crowdin.png" height="30" alt="Crowdin" /></a>
-  <a href="https://e2b.dev/"><img src="./packages/twenty-website/public/images/readme/e2b.svg" height="30" alt="E2B" /></a>
+  <a href="https://www.chromatic.com/"><img src="./packages/twenty-website/public/images/readme/chromatic.png" height="28" alt="Chromatic" /></a>&nbsp;&nbsp;
+  <a href="https://greptile.com"><img src="./packages/twenty-website/public/images/readme/greptile.png" height="28" alt="Greptile" /></a>&nbsp;&nbsp;
+  <a href="https://sentry.io/"><img src="./packages/twenty-website/public/images/readme/sentry.png" height="28" alt="Sentry" /></a>&nbsp;&nbsp;
+  <a href="https://crowdin.com/"><img src="./packages/twenty-website/public/images/readme/crowdin.png" height="28" alt="Crowdin" /></a>&nbsp;&nbsp;
+  <a href="https://e2b.dev/"><img src="./packages/twenty-website/public/images/readme/e2b.svg" height="28" alt="E2B" /></a>
 </p>
-
-Thanks to the Twenty team for building the foundation, and to Chromatic, Greptile, Sentry, Crowdin, and E2B whose tooling Twenty relies on.
