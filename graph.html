@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>AgenticCRM — Codebase Graph</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.css"/>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0d1117;font-family:'Segoe UI',monospace}
+  #graph{width:100vw;height:100vh}
+  #panel{position:fixed;top:12px;left:12px;background:#161b22;color:#c9d1d9;
+         padding:14px 16px;border-radius:8px;border:1px solid #30363d;
+         font-size:13px;max-width:300px;z-index:10}
+  #panel h2{color:#58a6ff;font-size:15px;margin-bottom:6px}
+  #panel .subtitle{color:#8b949e;font-size:11px;margin-bottom:8px}
+  #detail{margin-top:10px;border-top:1px solid #30363d;padding-top:10px;
+          font-size:12px;color:#8b949e;min-height:50px}
+  #search{position:fixed;top:12px;right:12px;background:#161b22;
+          border:1px solid #30363d;color:#c9d1d9;padding:8px 12px;
+          border-radius:6px;font-size:13px;width:200px;z-index:10}
+  #search:focus{outline:none;border-color:#58a6ff}
+  #legend{position:fixed;bottom:16px;left:12px;background:#161b22;
+          border:1px solid #30363d;border-radius:8px;padding:12px;
+          font-size:11px;color:#8b949e;z-index:10}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  #godlabel{position:fixed;bottom:16px;right:12px;background:#161b22;
+            border:1px solid #30363d;border-radius:8px;padding:10px 14px;
+            font-size:11px;color:#8b949e;z-index:10;max-width:220px}
+  #godlabel b{color:#FFD700}
+</style>
+</head>
+<body>
+<div id="panel">
+  <h2>🧠 AgenticCRM — Codebase Graph</h2>
+  <div class="subtitle">AgenticCRM AI modules · built with graphify</div>
+  <div id="stats"></div>
+  <div id="detail">Click a node to inspect</div>
+</div>
+<input id="search" placeholder="Search nodes…" oninput="doSearch(this.value)"/>
+<div id="graph"></div>
+<div id="legend" id="legend"></div>
+<div id="godlabel"><b>⭐ God nodes</b> (largest) are touched by the most other components</div>
+<script>
+const COLORS={api:'#4E79A7',auth:'#E15759',domain:'#59A14F',utils:'#F28E2B',
+              config:'#EDC948',infra:'#76B7B2',other:'#BAB0AC'};
+
+const RAW_NODES = [
+  // infra
+  {id:1, label:'GraphNodeEntity',          type:'entity',   layer:'infra',  file:'modules/graph-db/graph-node.entity.ts',           degree:3, summary:'CRM record node in core.graphNode with JSONB properties and pgvector embedding'},
+  {id:2, label:'GraphEdgeEntity',          type:'entity',   layer:'infra',  file:'modules/graph-db/graph-edge.entity.ts',           degree:2, summary:'Typed directed relationship between two GraphNodeEntity records'},
+  {id:3, label:'AiMemoryEpisodeEntity',    type:'entity',   layer:'infra',  file:'modules/ai-memory/ai-memory-episode.entity.ts',   degree:2, summary:'Conversation turns and agent actions — dual-purpose audit + episodic memory'},
+  {id:4, label:'AiKnowledgeChunkEntity',   type:'entity',   layer:'infra',  file:'modules/ai-memory/ai-knowledge-chunk.entity.ts',  degree:2, summary:'Chunked MD knowledge base content with pgvector embedding'},
+  {id:5, label:'AgentCapabilityRuleEntity',type:'entity',   layer:'infra',  file:'modules/agent-config/agent-capability-rule.entity.ts', degree:2, summary:'Per-entity-type permission flags and rate limit'},
+  {id:6, label:'GraphDbModule',            type:'module',   layer:'infra',  file:'modules/graph-db/graph-db.module.ts',             degree:2, summary:'NestJS DI container for GraphDbService and GraphSyncListener'},
+  {id:7, label:'AiMemoryModule',           type:'module',   layer:'infra',  file:'modules/ai-memory/ai-memory.module.ts',           degree:2, summary:'NestJS DI container for all 4 memory services'},
+  {id:8, label:'AgentConfigModule',        type:'module',   layer:'infra',  file:'modules/agent-config/agent-config.module.ts',     degree:2, summary:'NestJS DI container for all governance services and resolver'},
+  {id:9, label:'ModulesModule',            type:'module',   layer:'infra',  file:'modules/modules.module.ts',                      degree:3, summary:'Root aggregator — imports GraphDb + AiMemory + AgentConfig'},
+  // domain
+  {id:10, label:'GraphDbService',          type:'service',  layer:'domain', file:'modules/graph-db/graph-db.service.ts',            degree:5, summary:'Upsert/traverse/vector-search over graph nodes and edges — GOD NODE'},
+  {id:11, label:'GraphSyncListener',       type:'listener', layer:'domain', file:'modules/graph-db/graph-sync.listener.ts',         degree:2, summary:'Dual-write bridge: CRM DB events → graph via @OnDatabaseBatchEvent'},
+  {id:12, label:'EpisodicMemoryService',   type:'service',  layer:'domain', file:'modules/ai-memory/episodic-memory.service.ts',    degree:4, summary:'Append-only episode storage + pgvector semantic recall — GOD NODE'},
+  {id:13, label:'SemanticMemoryService',   type:'service',  layer:'domain', file:'modules/ai-memory/semantic-memory.service.ts',    degree:2, summary:'Combined entity + knowledge pgvector search'},
+  {id:14, label:'KnowledgeLoaderService',  type:'service',  layer:'domain', file:'modules/ai-memory/knowledge-loader.service.ts',   degree:3, summary:'Auto-indexes ai-knowledge/ MD files on server startup'},
+  {id:15, label:'MemoryContextBuilderService',type:'service',layer:'domain',file:'modules/ai-memory/memory-context-builder.service.ts',degree:5,summary:'Assembles LLM system-prompt context from all memory layers — GOD NODE'},
+  {id:16, label:'AgentCapabilityService',  type:'service',  layer:'domain', file:'modules/agent-config/agent-capability.service.ts',degree:4, summary:'Permission resolution engine for agent actions — GOD NODE'},
+  {id:17, label:'AgentAuditService',       type:'service',  layer:'domain', file:'modules/agent-config/agent-audit.service.ts',     degree:2, summary:'Logs agent actions to episodic memory — non-blocking'},
+  {id:18, label:'AgentRateLimiterService', type:'service',  layer:'domain', file:'modules/agent-config/agent-rate-limiter.service.ts',degree:2,summary:'Token-bucket rate limiting; per-entity + global 200/hr cap'},
+  // api
+  {id:19, label:'AgentCapabilityResolver', type:'resolver', layer:'api',    file:'modules/agent-config/agent-capability.resolver.ts',degree:2, summary:'GraphQL queries/mutations for capability rules'},
+  {id:20, label:'AgentCapabilityRuleDTO',  type:'dto',      layer:'api',    file:'modules/agent-config/dtos/agent-capability-rule.dto.ts',degree:1,summary:'GraphQL output type for capability rules'},
+  {id:21, label:'SettingsAI',              type:'component',layer:'api',    file:'pages/settings/ai/SettingsAI.tsx',                degree:1, summary:'Top-level AI settings page with 7 tabs'},
+  {id:22, label:'SettingsAIBrainTab',      type:'component',layer:'api',    file:'pages/settings/ai/components/SettingsAIBrainTab.tsx',degree:1,summary:'Read-only AI infrastructure health dashboard'},
+  {id:23, label:'SettingsAIPermissionsTab',type:'component',layer:'api',    file:'pages/settings/ai/components/SettingsAIPermissionsTab.tsx',degree:2,summary:'Capability matrix editor wired to real GraphQL API'},
+  // config
+  {id:24, label:'KnowledgeBase',           type:'concept',  layer:'config', file:'ai-knowledge/ (9 MD files)',                     degree:2, summary:'Markdown files defining workflows, rules, procedures, agent personality'}
+];
+
+const RAW_EDGES = [
+  // GraphDbService dependencies and users
+  {from:10, to:1,  label:'uses entity'},
+  {from:10, to:2,  label:'uses entity'},
+  {from:11, to:10, label:'writes graph'},
+  {from:11, to:1,  label:'via service'},
+  {from:13, to:10, label:'findSimilarNodes'},
+  {from:15, to:10, label:'getNodeWithRelationships'},
+  // AiMemory services
+  {from:12, to:3,  label:'uses entity'},
+  {from:13, to:4,  label:'searches chunks'},
+  {from:14, to:4,  label:'reads/writes chunks'},
+  {from:14, to:24, label:'indexes files'},
+  {from:15, to:12, label:'getRecentActions'},
+  {from:15, to:14, label:'getChunksForContext'},
+  {from:15, to:10, label:'getNodeWithRelationships'},
+  // AgentConfig services
+  {from:16, to:5,  label:'CRUD rules'},
+  {from:17, to:12, label:'store action'},
+  {from:18, to:16, label:'getPermissions'},
+  {from:19, to:16, label:'delegates to'},
+  {from:19, to:20, label:'return type'},
+  // Module wiring
+  {from:6,  to:10, label:'provides'},
+  {from:6,  to:11, label:'provides'},
+  {from:7,  to:12, label:'provides'},
+  {from:7,  to:13, label:'provides'},
+  {from:7,  to:14, label:'provides'},
+  {from:7,  to:15, label:'provides'},
+  {from:7,  to:6,  label:'imports'},
+  {from:8,  to:16, label:'provides'},
+  {from:8,  to:17, label:'provides'},
+  {from:8,  to:18, label:'provides'},
+  {from:8,  to:19, label:'provides'},
+  {from:8,  to:7,  label:'imports'},
+  {from:9,  to:6,  label:'imports'},
+  {from:9,  to:7,  label:'imports'},
+  {from:9,  to:8,  label:'imports'},
+  // Frontend
+  {from:21, to:22, label:'renders Brain tab'},
+  {from:21, to:23, label:'renders Permissions tab'},
+  {from:23, to:19, label:'GraphQL query/mutation'},
+  // Knowledge base
+  {from:15, to:24, label:'loads personality'},
+  {from:13, to:24, label:'semantic search'},
+];
+
+// Build legend
+const layers=[...new Set(RAW_NODES.map(n=>n.layer||'other'))];
+document.getElementById('legend').innerHTML=
+  '<b style="color:#c9d1d9;display:block;margin-bottom:6px">Layers</b>'+
+  layers.map(l=>`<div style="margin:3px 0"><span class="dot" style="background:${COLORS[l]||COLORS.other}"></span>${l}</div>`).join('');
+
+document.getElementById('stats').innerHTML=
+  `<span style="color:#8b949e">${RAW_NODES.length} nodes · ${RAW_EDGES.length} edges</span>`;
+
+const nodes=new vis.DataSet(RAW_NODES.map(n=>({
+  id:n.id, label:n.label,
+  title:`<b>${n.label}</b><br><i>${n.type}</i><br><span style="color:#8b949e">${n.file}</span><br><br>${n.summary||''}`,
+  color:{background:COLORS[n.layer]||COLORS.other, border:'#1a1a2e',
+         highlight:{background:'#FFD700',border:'#1a1a2e'}},
+  size:Math.max(12,(n.degree||1)*8),
+  font:{color:'#fff', size:n.degree>4?15:n.degree>2?13:11, face:'Segoe UI'},
+  borderWidth:n.degree>4?4:n.degree>2?2:1,
+  shadow:n.degree>4,
+})));
+
+const edges=new vis.DataSet(RAW_EDGES.map((e,i)=>({
+  id:i, from:e.from, to:e.to,
+  label:e.label||'',
+  arrows:'to',
+  color:{color:'#2d3748',opacity:0.9,highlight:'#58a6ff'},
+  font:{color:'#4a5568',size:9,align:'middle'},
+  smooth:{type:'continuous',roundness:0.25},
+  width:1,
+})));
+
+const net=new vis.Network(
+  document.getElementById('graph'),{nodes,edges},
+  {
+    physics:{
+      solver:'forceAtlas2Based',
+      forceAtlas2Based:{gravitationalConstant:-80,springLength:160,springConstant:0.04,damping:0.5,avoidOverlap:0.3},
+      stabilization:{iterations:300,updateInterval:50}
+    },
+    interaction:{hover:true,keyboard:true,tooltipDelay:200,navigationButtons:true},
+    layout:{randomSeed:42}
+  }
+);
+
+net.on('click',p=>{
+  if(!p.nodes.length){
+    document.getElementById('detail').innerHTML='Click a node to inspect';
+    return;
+  }
+  const n=RAW_NODES.find(x=>x.id===p.nodes[0]);
+  if(!n) return;
+  document.getElementById('detail').innerHTML=
+    `<b style="color:#c9d1d9">${n.label}</b><br>`+
+    `<span style="color:#58a6ff;font-size:11px">${n.type} · ${n.layer}</span><br>`+
+    `<span style="color:#6e7681;font-size:10px">${n.file}</span>`+
+    (n.summary?`<br><br><span style="color:#8b949e">${n.summary}</span>`:'');
+});
+
+net.on('stabilizationIterationsDone',()=>{
+  net.setOptions({physics:{enabled:false}});
+});
+
+function doSearch(q){
+  if(!q){nodes.update(RAW_NODES.map(n=>({id:n.id,hidden:false,opacity:1})));return;}
+  const ql=q.toLowerCase();
+  nodes.update(RAW_NODES.map(n=>({
+    id:n.id,
+    hidden:false,
+    color:{
+      background:n.label.toLowerCase().includes(ql)?COLORS[n.layer]:'#1a1a2e',
+      border:n.label.toLowerCase().includes(ql)?'#FFD700':'#30363d',
+      highlight:{background:'#FFD700',border:'#1a1a2e'}
+    }
+  })));
+}
+</script>
+</body>
+</html>
